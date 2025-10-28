@@ -1,444 +1,703 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
-
-// Lakshmi Boutique - Single-file React app (preview). Uses localStorage as a simple backend.
-// Features implemented:
-// - Separate Admin and User login (admin has preset credentials)
-// - Signup and Login for users (stored in localStorage)
-// - Admin product CRUD (upload image as Base64, edit, remove)
-// - Product listing, product details, add to cart
-// - Simple checkout flow with placeholder for payment integrations (Stripe/PayPal)
-// - WhatsApp contact + pickup notes displayed on site
-// - Notifications to users when admin updates products (simple in-app 'news' feed)
-// - All code in one file for quick testing. Tailwind CSS classes are used (you can remove/replace with plain CSS).
-
-// IMPORTANT: This is a demo single-file app for local testing and small deployments. For a production site:
-// - Add a real backend (Node/Express, Django, etc.) with secure authentication and a database.
-// - Use a cloud storage (S3) for images, and integrate a payments gateway (Stripe/PayPal/Paytm/Razorpay).
-// - Serve over HTTPS and follow security best practices.
-
-// --------- Utilities & Defaults ----------
-const ADMIN_EMAIL = 'admin@lakshmi.com';
-const ADMIN_PASSWORD = 'Lakshmi@123';
-const WHATSAPP = '+91 86392 99665';
-
-function uid() { return Math.random().toString(36).slice(2, 9); }
-
-// localStorage keys
-const LS = {
-  PRODUCTS: 'lb_products_v1',
-  USERS: 'lb_users_v1',
-  SESS: 'lb_session_v1',
-  NEWS: 'lb_news_v1'
-};
-
-function readLS(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } }
-function writeLS(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
-
-// bootstrap sample products if none
-function seedProducts() {
-  const existing = readLS(LS.PRODUCTS, null);
-  if (!existing) {
-    const samples = [
-      { id: uid(), title: 'Red Silk Sari', price: 2499, qty: 5, desc: 'Beautiful red silk sari - handwork', image: null },
-      { id: uid(), title: 'Blue Cotton Dress', price: 1499, qty: 8, desc: 'Comfortable cotton dress - daily wear', image: null },
-    ];
-    writeLS(LS.PRODUCTS, samples);
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lakshmi Boutique</title>
+<style>
+  :root{
+    --bg:#faf8f6; --card:#fff; --accent:#b03060; --muted:#666;
+    --success:#2b8a3e; --danger:#c0392b;
+    --glass: rgba(255,255,255,0.6);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
   }
-}
+  body{ margin:0; background:linear-gradient(180deg,#fff 0%,#f7eef2 100%); color:#222; }
+  header{ display:flex; align-items:center; justify-content:space-between; padding:18px 28px; background:var(--card); box-shadow:0 3px 10px rgba(0,0,0,0.04); position:sticky; top:0; z-index:10; }
+  .brand{ display:flex; gap:12px; align-items:center; }
+  .logo{ width:56px; height:56px; background:linear-gradient(135deg,#ffd6e0,#ffe6f0); border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--accent); font-size:18px; box-shadow:0 6px 18px rgba(176,48,96,0.08);}
+  h1{ margin:0; font-size:18px; letter-spacing:0.2px;}
+  header nav{ display:flex; gap:10px; align-items:center; }
+  button, .link-btn{ border:0; background:transparent; padding:8px 12px; border-radius:8px; cursor:pointer; }
+  .btn-primary{ background:var(--accent); color:#fff; padding:10px 14px; border-radius:10px; font-weight:600; }
+  main{ padding:28px; max-width:1100px; margin:0 auto; }
+  .grid{ display:grid; grid-template-columns:1fr 320px; gap:20px; align-items:start; }
+  .card{ background:var(--card); padding:18px; border-radius:16px; box-shadow:0 8px 30px rgba(20,20,20,0.04); }
+  .products{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; margin-top:16px; }
+  .product{ border-radius:12px; overflow:hidden; background:linear-gradient(180deg,#fff,#fff); display:flex; flex-direction:column; }
+  .product img{ width:100%; height:220px; object-fit:cover; display:block; }
+  .product .meta{ padding:10px; display:flex; justify-content:space-between; align-items:center; }
+  .price{ font-weight:700; color:var(--accent); }
+  .small{ font-size:13px; color:var(--muted); }
+  .tag{ font-size:12px; padding:6px 8px; border-radius:999px; background:var(--glass); display:inline-block; margin-right:6px; }
+  .right-col{ position:sticky; top:86px; }
+  .form-row{ display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
+  input[type="text"], input[type="number"], input[type="password"], select, textarea{ padding:10px 12px; border-radius:10px; border:1px solid #eee; background:#fafafa; outline:none; }
+  .muted{ color:var(--muted); font-size:13px; }
+  .notice{ background:#fff8e6; border-left:4px solid #ffd166; padding:12px; border-radius:10px; margin-bottom:12px; }
+  .center{ text-align:center; }
+  footer{ margin-top:24px; text-align:center; color:var(--muted); font-size:13px; padding-bottom:40px; }
+  /* login modal */
+  .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(10,10,10,0.35); z-index:200; }
+  .modal.open{ display:flex; }
+  .modal .box{ width:420px; max-width:94%; padding:18px; border-radius:14px; background:var(--card); }
+  .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+  .product .actions{ display:flex; gap:8px; padding:10px; border-top:1px solid #f2f2f2; }
+  .small-muted{ font-size:12px; color:#999; }
+  .badge{ font-size:12px; padding:6px 8px; border-radius:8px; background:#f7f7f7; }
+  /* responsive */
+  @media (max-width:920px){
+    .grid{ grid-template-columns:1fr; }
+    .right-col{ position:static; top:auto; }
+  }
+</style>
+</head>
+<body>
 
-seedProducts();
-
-// --------- App ----------
-export default function LakshmiBoutiqueApp() {
-  return (
-    <Router>
-      <div className="min-h-screen bg-gray-50">
-        <Header />
-        <main className="container mx-auto p-4">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/admin/*" element={<AdminRoutes />} />
-            <Route path="/product/:id" element={<ProductDetails />} />
-            <Route path="/cart" element={<CartPage />} />
-            <Route path="/news" element={<NewsPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </main>
-        <Footer />
-      </div>
-    </Router>
-  );
-}
-
-// --------- Header & Footer ----------
-function Header() {
-  const session = readLS(LS.SESS, null);
-  const navigate = useNavigate();
-  const handleLogout = () => { localStorage.removeItem(LS.SESS); navigate('/'); };
-  return (
-    <header className="bg-white shadow-sm">
-      <div className="container mx-auto flex items-center justify-between p-4">
-        <Link to="/" className="text-2xl font-bold">Lakshmi Boutique</Link>
-        <nav className="space-x-4">
-          <Link to="/">Home</Link>
-          <Link to="/news">Updates</Link>
-          <Link to="/cart">Cart</Link>
-          {session ? (
-            <>
-              <span className="mx-2">Hello, {session.name}</span>
-              {session.isAdmin ? <Link to="/admin">Admin</Link> : null}
-              <button onClick={handleLogout} className="ml-2 underline">Logout</button>
-            </>
-          ) : (
-            <>
-              <Link to="/login">Login</Link>
-              <Link to="/signup">Sign up</Link>
-            </>
-          )}
-        </nav>
-      </div>
-    </header>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="mt-8 bg-white border-t">
-      <div className="container mx-auto p-4 flex justify-between">
-        <div>
-          <div className="font-semibold">Contact</div>
-          <div>WhatsApp: {WHATSAPP}</div>
-          <div className="text-sm mt-2">1. Your cloths material will be picked-up from your home — our shop person will come to your house.<br/>2. The first time pick-up is free.</div>
-        </div>
-        <div className="text-right text-sm">&copy; Lakshmi Boutique</div>
-      </div>
-    </footer>
-  );
-}
-
-// --------- Pages ----------
-function Home() {
-  const products = readLS(LS.PRODUCTS, []);
-  return (
+<header>
+  <div class="brand">
+    <div class="logo">LB</div>
     <div>
-      <Hero />
-      <section className="mt-6">
-        <h2 className="text-xl font-semibold mb-4">Products</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {products.map(p => (
-            <ProductCard key={p.id} p={p} />
-          ))}
+      <h1>Lakshmi Boutique</h1>
+      <div class="small muted">Traditional & modern — dresses, sarees, blouses</div>
+    </div>
+  </div>
+
+  <nav>
+    <div class="small muted">WhatsApp: <strong>+91 86392 99665</strong></div>
+    <button class="link-btn" id="open-login">Login / Signup</button>
+    <button class="btn-primary" id="open-admin">Admin Panel</button>
+  </nav>
+</header>
+
+<main>
+  <div class="grid">
+    <section>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h2 style="margin:0">All Products</h2>
+            <div class="small muted">Low & reasonable prices — handpicked</div>
+          </div>
+          <div class="small-muted" id="current-user-display">Not signed in</div>
         </div>
-      </section>
-    </div>
-  );
-}
 
-function Hero() {
-  return (
-    <div className="bg-white p-6 rounded shadow-sm flex items-center justify-between">
-      <div>
-        <h1 className="text-2xl font-bold">Welcome to Lakshmi Boutique</h1>
-        <p className="mt-2">Low and reasonable prices. Admin-managed catalogue. Pickup service available.</p>
-        <div className="mt-3">
-          <Link to="/signup" className="px-3 py-2 bg-indigo-600 text-white rounded">Shop Now</Link>
+        <div class="notice" style="margin-top:12px;">
+          <strong>Pickup Notes:</strong>
+          <ol style="margin:8px 0 0 18px; padding:0;">
+            <li>Your cloths material will be pick-up from your home — our shop person will come to your house.</li>
+            <li>The first time pick-up is free.</li>
+          </ol>
+        </div>
+
+        <div id="products-list" class="products" aria-live="polite"></div>
+
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 style="margin:0 0 8px 0">Announcements / Updates</h3>
+        <div id="announcements">
+          <div class="small muted">No announcements yet.</div>
         </div>
       </div>
-      <div className="hidden md:block w-48">
-        <img src={`data:image/svg+xml;utf8,${encodeURIComponent(dummyImageSVG())}`} alt="banner" />
-      </div>
-    </div>
-  );
-}
 
-function dummyImageSVG() {
-  return `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='150'><rect width='100%' height='100%' fill='#f3f4f6'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#9ca3af' font-size='18'>Lakshmi Boutique</text></svg>`;
-}
+    </section>
 
-function ProductCard({ p }) {
-  const navigate = useNavigate();
-  const handleView = () => navigate(`/product/${p.id}`);
-  return (
-    <div className="bg-white p-4 rounded shadow-sm">
-      <div className="h-48 flex items-center justify-center bg-gray-100 mb-3">{p.image ? <img src={p.image} alt={p.title} className="max-h-full"/> : <div className="text-sm">No image</div>}</div>
-      <h3 className="font-semibold">{p.title}</h3>
-      <div className="text-sm text-gray-600">₹{p.price} | Stock: {p.qty}</div>
-      <div className="mt-2 flex justify-between">
-        <button onClick={handleView} className="underline">View</button>
-      </div>
-    </div>
-  );
-}
+    <aside class="right-col">
+      <div class="card">
+        <h3 style="margin:0 0 8px 0">Quick Actions</h3>
+        <div class="form-row">
+          <button id="btn-view-cart" class="btn-primary">My Cart (<span id="cart-count">0</span>)</button>
+        </div>
 
-// --------- Product Details & Cart ----------
-function ProductDetails() {
-  const { pathname } = window.location;
-  const id = pathname.split('/').pop();
-  const products = readLS(LS.PRODUCTS, []);
-  const p = products.find(x => x.id === id);
-  const navigate = useNavigate();
-  if (!p) return <div>Product not found. <Link to="/">Go home</Link></div>;
-  const handleAdd = () => {
-    const cart = readLS('lb_cart_v1', []);
-    const existing = cart.find(i => i.id === p.id);
-    if (existing) existing.qty += 1; else cart.push({ id: p.id, title: p.title, price: p.price, qty: 1, image: p.image });
-    writeLS('lb_cart_v1', cart);
-    alert('Added to cart');
-    navigate('/cart');
-  };
-  return (
-    <div className="bg-white p-4 rounded shadow-sm">
-      <div className="md:flex gap-6">
-        <div className="md:w-1/3 bg-gray-100 flex items-center justify-center h-64">{p.image ? <img src={p.image} alt={p.title} className="max-h-full"/> : 'No image'}</div>
-        <div className="md:flex-1">
-          <h2 className="text-2xl font-bold">{p.title}</h2>
-          <div className="text-xl mt-2">₹{p.price}</div>
-          <div className="mt-4">{p.desc}</div>
-          <div className="mt-6">
-            <button onClick={handleAdd} className="px-4 py-2 bg-green-600 text-white rounded">Add to Cart</button>
+        <hr style="margin:12px 0" />
+
+        <div style="display:flex; gap:8px; align-items:center; justify-content:space-between;">
+          <div>
+            <div class="small-muted">Contact</div>
+            <div style="font-weight:700">WhatsApp: +91 86392 99665</div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function CartPage() {
-  const [cart, setCart] = useState(readLS('lb_cart_v1', []));
-  const navigate = useNavigate();
-  useEffect(() => { writeLS('lb_cart_v1', cart); }, [cart]);
-  const removeItem = (id) => setCart(c => c.filter(i => i.id !== id));
-  const changeQty = (id, delta) => setCart(c => c.map(i => i.id===id?{...i, qty: Math.max(1, i.qty+delta)}:i));
-  const total = cart.reduce((s,i)=>s+i.price*i.qty,0);
-  if (cart.length===0) return <div className="bg-white p-4 rounded">Cart is empty. <Link to="/">Shop</Link></div>;
-  return (
-    <div className="bg-white p-4 rounded shadow-sm">
-      <h2 className="text-xl font-semibold">Your Cart</h2>
-      <div className="mt-4 space-y-3">
-        {cart.map(i => (
-          <div key={i.id} className="flex items-center justify-between p-2 border rounded">
-            <div className="flex items-center gap-3">
-              <div className="w-16 h-16 bg-gray-100 flex items-center justify-center">{i.image? <img src={i.image} alt={i.title} className="max-h-full"/> : 'No'}</div>
-              <div>
-                <div className="font-semibold">{i.title}</div>
-                <div>₹{i.price} x {i.qty}</div>
-              </div>
+      <div class="card" style="margin-top:16px;">
+        <h4 style="margin:0 0 8px 0">About Pricing</h4>
+        <div class="small-muted">We keep prices low and reasonable. Check product cards for discounts and tags.</div>
+      </div>
+
+    </aside>
+  </div>
+
+  <footer>
+    &copy; <span id="year"></span> Lakshmi Boutique — Built for demo. Data stored locally in browser.
+  </footer>
+</main>
+
+<!-- Login / Signup Modal -->
+<div class="modal" id="auth-modal" aria-hidden="true">
+  <div class="box">
+    <h3 id="auth-title">Sign In</h3>
+    <div id="auth-forms">
+      <div id="signin-form">
+        <div class="form-row">
+          <label>Email or Phone</label>
+          <input id="signin-username" type="text" placeholder="email or phone" />
+        </div>
+        <div class="form-row">
+          <label>Password</label>
+          <input id="signin-password" type="password" placeholder="password" />
+        </div>
+        <div class="actions">
+          <button class="link-btn" id="to-signup">Create account</button>
+          <button class="btn-primary" id="do-signin">Sign in</button>
+        </div>
+      </div>
+
+      <div id="signup-form" style="display:none;">
+        <div class="form-row">
+          <label>Full name</label>
+          <input id="signup-name" type="text" />
+        </div>
+        <div class="form-row">
+          <label>Email or Phone</label>
+          <input id="signup-username" type="text" />
+        </div>
+        <div class="form-row">
+          <label>Password</label>
+          <input id="signup-password" type="password" />
+        </div>
+        <div class="actions">
+          <button class="link-btn" id="to-signin">Back to sign in</button>
+          <button class="btn-primary" id="do-signup">Create account</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Modal -->
+<div class="modal" id="admin-modal" aria-hidden="true">
+  <div class="box">
+    <h3>Admin Panel</h3>
+
+    <div id="admin-login">
+      <div class="form-row">
+        <label>Admin username</label>
+        <input id="admin-username" type="text" placeholder="admin" />
+      </div>
+      <div class="form-row">
+        <label>Admin password</label>
+        <input id="admin-password" type="password" placeholder="admin123" />
+      </div>
+      <div class="actions">
+        <button class="link-btn" id="admin-close">Close</button>
+        <button class="btn-primary" id="admin-login-btn">Sign in</button>
+      </div>
+    </div>
+
+    <div id="admin-panel" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong>Admin — Manage Products</strong>
+        <div class="small-muted">Signed in</div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div class="form-row">
+          <label>Product name</label>
+          <input id="p-name" type="text" placeholder="e.g., Banarasi saree" />
+        </div>
+        <div class="form-row">
+          <label>Price (INR)</label>
+          <input id="p-price" type="number" placeholder="4999" />
+        </div>
+        <div class="form-row">
+          <label>Tags (comma separated, e.g. saree,banarasi)</label>
+          <input id="p-tags" type="text" />
+        </div>
+        <div class="form-row">
+          <label>Image</label>
+          <input id="p-image" type="file" accept="image/*" />
+        </div>
+        <div class="actions">
+          <button class="link-btn" id="admin-logout">Logout</button>
+          <button class="btn-primary" id="add-product-btn">Add Product</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <h4 style="margin:0 0 8px 0">Existing products</h4>
+        <div id="admin-products" style="display:grid; gap:8px"></div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <h4 style="margin:0 0 8px 0">Announcements</h4>
+        <div class="form-row">
+          <textarea id="announcement-text" rows="3" placeholder="Write an announcement to show to all users"></textarea>
+        </div>
+        <div class="actions">
+          <button class="btn-primary" id="save-announcement">Publish</button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- Cart Modal -->
+<div class="modal" id="cart-modal">
+  <div class="box">
+    <h3>My Cart</h3>
+    <div id="cart-contents">
+      <div class="small-muted">Cart is empty.</div>
+    </div>
+    <div class="actions" style="margin-top:12px;">
+      <button class="link-btn" id="close-cart">Close</button>
+      <button class="btn-primary" id="checkout-btn">Checkout</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Simple client-side app using localStorage
+  const LS_PRODUCTS = 'lb_products_v1';
+  const LS_USERS = 'lb_users_v1';
+  const LS_CURRENT = 'lb_current_v1';
+  const LS_ANNOUNCE = 'lb_announcements_v1';
+  const YEAR = new Date().getFullYear();
+  document.getElementById('year').textContent = YEAR;
+
+  // default admin credentials (change here if you want)
+  const ADMIN_DEFAULTS = { username: 'admin', password: 'admin123' };
+
+  // helpers
+  const readProducts = ()=> JSON.parse(localStorage.getItem(LS_PRODUCTS) || '[]');
+  const writeProducts = (p)=> localStorage.setItem(LS_PRODUCTS, JSON.stringify(p));
+  const readUsers = ()=> JSON.parse(localStorage.getItem(LS_USERS) || '[]');
+  const writeUsers = (u)=> localStorage.setItem(LS_USERS, JSON.stringify(u));
+  const getCurrent = ()=> JSON.parse(localStorage.getItem(LS_CURRENT) || 'null');
+  const setCurrent = (c)=> localStorage.setItem(LS_CURRENT, JSON.stringify(c));
+
+  const getAnnouncements = ()=> JSON.parse(localStorage.getItem(LS_ANNOUNCE) || '[]');
+  const setAnnouncements = (a)=> localStorage.setItem(LS_ANNOUNCE, JSON.stringify(a));
+
+  // UI refs
+  const productsList = document.getElementById('products-list');
+  const adminModal = document.getElementById('admin-modal');
+  const authModal = document.getElementById('auth-modal');
+  const cartModal = document.getElementById('cart-modal');
+  const currentUserDisplay = document.getElementById('current-user-display');
+  const cartCount = document.getElementById('cart-count');
+
+  // Ensure admin exists in users store (not saved as regular user password - admin is checked separately)
+  if(!readUsers()) writeUsers([]);
+
+  // render products
+  function renderProducts(){
+    const products = readProducts();
+    productsList.innerHTML = '';
+    if(!products.length){
+      productsList.innerHTML = '<div class="small-muted">No products yet. Admin can add products.</div>';
+    } else {
+      products.forEach((p, idx)=>{
+        const div = document.createElement('div');
+        div.className = 'product card';
+        div.innerHTML = `
+          <img src="${p.image}" alt="${escapeHtml(p.name)}" />
+          <div class="meta">
+            <div>
+              <div style="font-weight:700">${escapeHtml(p.name)}</div>
+              <div class="small">${escapeHtml(p.tags.join(', '))}</div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={()=>changeQty(i.id,-1)} className="px-2">-</button>
-              <button onClick={()=>changeQty(i.id,1)} className="px-2">+</button>
-              <button onClick={()=>removeItem(i.id)} className="ml-2 underline">Remove</button>
+            <div style="text-align:right">
+              <div class="price">₹${Number(p.price).toLocaleString()}</div>
+              <div class="small-muted">Low & reasonable</div>
             </div>
           </div>
-        ))}
-      </div>
-      <div className="mt-4 flex justify-between items-center">
-        <div className="font-semibold">Total: ₹{total}</div>
-        <div>
-          <button onClick={()=>navigate('/login')} className="px-3 py-2 bg-blue-600 text-white rounded mr-2">Login to Checkout</button>
-          <button onClick={()=>alert('Payment placeholder. Integrate Stripe/PayPal/Razorpay in production.')} className="px-3 py-2 bg-green-600 text-white rounded">Proceed to Payment</button>
-        </div>
-      </div>
-      <div className="mt-3 text-sm text-gray-600">Note: The site supports multiple payment methods in production (Stripe / PayPal / Razorpay). This demo shows a placeholder button.</div>
-    </div>
-  );
-}
-
-// --------- News/Updates (admin pushes updates) ----------
-function NewsPage() {
-  const news = readLS(LS.NEWS, []);
-  return (
-    <div className="bg-white p-4 rounded shadow-sm">
-      <h2 className="text-xl font-semibold">Updates from Lakshmi Boutique</h2>
-      <div className="mt-4 space-y-3">
-        {news.length===0 ? <div>No updates yet.</div> : news.map(n => (
-          <div key={n.id} className="p-2 border rounded">
-            <div className="font-semibold">{n.title}</div>
-            <div className="text-sm text-gray-600">{new Date(n.date).toLocaleString()}</div>
-            <div className="mt-2">{n.body}</div>
+          <div style="padding:10px 12px; display:flex; gap:8px; align-items:center; justify-content:space-between;">
+            <div>
+              ${p.isNew ? '<span class="tag">New</span>' : ''}
+              ${p.tags.includes('discount') ? '<span class="tag">Discount</span>' : ''}
+            </div>
+            <div>
+              <button class="link-btn" data-buy="${idx}">Buy</button>
+              <button class="link-btn" data-add="${idx}">Add to cart</button>
+              <button class="link-btn" data-view="${idx}">View</button>
+            </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// --------- Auth (Signup/Login) ----------
-function Signup() {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', email:'', password:'' });
-  const handle = () => {
-    const users = readLS(LS.USERS, []);
-    if (users.find(u => u.email === form.email)) { alert('Email already used'); return; }
-    const newUser = { id: uid(), name: form.name, email: form.email, password: form.password };
-    users.push(newUser); writeLS(LS.USERS, users);
-    writeLS(LS.SESS, { id: newUser.id, name: newUser.name, email: newUser.email, isAdmin: false });
-    navigate('/');
-  };
-  return (
-    <div className="max-w-md mx-auto bg-white p-4 rounded">
-      <h2 className="text-xl font-semibold">Sign up</h2>
-      <div className="mt-3 space-y-2">
-        <input placeholder="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full p-2 border rounded" />
-        <input placeholder="Email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="w-full p-2 border rounded" />
-        <input placeholder="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} className="w-full p-2 border rounded" />
-        <div className="flex justify-end">
-          <button onClick={handle} className="px-3 py-2 bg-indigo-600 text-white rounded">Create account</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Login() {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ email:'', password:'' });
-  const handle = () => {
-    if (form.email === ADMIN_EMAIL && form.password === ADMIN_PASSWORD) {
-      writeLS(LS.SESS, { id: 'admin', name: 'Admin', email: ADMIN_EMAIL, isAdmin: true });
-      navigate('/admin'); return;
+          <div class="actions">
+            <div class="small-muted">Product ID: ${idx}</div>
+            <div>
+              <button class="link-btn" data-share="${idx}">Share (WhatsApp)</button>
+            </div>
+          </div>
+        `;
+        productsList.appendChild(div);
+      });
     }
-    const users = readLS(LS.USERS, []);
-    const u = users.find(uu => uu.email === form.email && uu.password === form.password);
-    if (!u) { alert('Invalid credentials'); return; }
-    writeLS(LS.SESS, { id: u.id, name: u.name, email: u.email, isAdmin: false });
-    navigate('/');
-  };
-  return (
-    <div className="max-w-md mx-auto bg-white p-4 rounded">
-      <h2 className="text-xl font-semibold">Login</h2>
-      <div className="mt-3 space-y-2">
-        <input placeholder="Email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="w-full p-2 border rounded" />
-        <input placeholder="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} className="w-full p-2 border rounded" />
-        <div className="flex justify-end">
-          <button onClick={handle} className="px-3 py-2 bg-indigo-600 text-white rounded">Login</button>
-        </div>
-        <div className="text-sm text-gray-600">Admin credentials (demo): {ADMIN_EMAIL} / {ADMIN_PASSWORD}</div>
-      </div>
-    </div>
-  );
-}
+  }
 
-// --------- Admin Routes & Dashboard ----------
-function AdminRoutes() {
-  const session = readLS(LS.SESS, null);
-  if (!session || !session.isAdmin) return <Navigate to="/login" replace />;
-  return (
-    <Routes>
-      <Route path="/" element={<AdminDashboard />} />
-      <Route path="/products" element={<AdminProducts />} />
-      <Route path="/news" element={<AdminNews />} />
-    </Routes>
-  );
-}
-
-function AdminDashboard() {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div className="bg-white p-4 rounded">Welcome, Admin</div>
-      <div className="bg-white p-4 rounded">Manage Products: <Link to="/admin/products" className="underline">Open</Link></div>
-      <div className="bg-white p-4 rounded">Post Updates: <Link to="/admin/news" className="underline">Open</Link></div>
-    </div>
-  );
-}
-
-function AdminProducts() {
-  const [products, setProducts] = useState(readLS(LS.PRODUCTS, []));
-  const [editing, setEditing] = useState(null);
-  useEffect(()=> writeLS(LS.PRODUCTS, products), [products]);
-  const addBlank = () => setEditing({ id: uid(), title:'', price:0, qty:1, desc:'', image: null });
-  const save = (obj) => {
-    setProducts(p => {
-      const exists = p.find(x=>x.id===obj.id);
-      if (exists) return p.map(x=>x.id===obj.id?obj:x);
-      return [obj, ...p];
-    });
-    setEditing(null);
-    pushNews(`Product updated`, `Product "${obj.title}" was added/updated by admin.`);
-    alert('Saved');
-  };
-  const remove = (id) => { if (!confirm('Remove product?')) return; setProducts(p=>p.filter(x=>x.id!==id)); pushNews('Product removed', 'A product was removed by admin.'); };
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold">Manage Products</h2>
+  function renderAdminProducts(){
+    const container = document.getElementById('admin-products');
+    const p = readProducts();
+    container.innerHTML = '';
+    if(!p.length) container.innerHTML = '<div class="small-muted">No products.</div>';
+    p.forEach((prod, idx)=>{
+      const el = document.createElement('div');
+      el.style.display = 'flex';
+      el.style.justifyContent = 'space-between';
+      el.style.alignItems = 'center';
+      el.style.background = '#fff';
+      el.style.padding = '8px';
+      el.style.borderRadius = '8px';
+      el.innerHTML = `<div style="display:flex; gap:8px; align-items:center;">
+        <img src="${prod.image}" style="width:48px;height:48px;object-fit:cover;border-radius:6px" />
         <div>
-          <button onClick={addBlank} className="px-3 py-2 bg-indigo-600 text-white rounded">Add Product</button>
+          <div style="font-weight:700">${escapeHtml(prod.name)}</div>
+          <div class="small-muted">₹${Number(prod.price).toLocaleString()}</div>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {products.map(p => (
-          <div key={p.id} className="bg-white p-3 rounded border">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="font-semibold">{p.title}</div>
-                <div className="text-sm text-gray-600">₹{p.price} | Stock: {p.qty}</div>
-              </div>
-              <div className="space-x-2">
-                <button onClick={()=>setEditing(p)} className="underline">Edit</button>
-                <button onClick={()=>remove(p.id)} className="underline text-red-600">Remove</button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {editing && <ProductEditor obj={editing} onCancel={()=>setEditing(null)} onSave={save} />}
-    </div>
-  );
-}
+      <div>
+        <button class="link-btn" data-edit="${idx}">Edit</button>
+        <button class="link-btn" data-delete="${idx}">Delete</button>
+      </div>`;
+      container.appendChild(el);
+    });
+  }
 
-function ProductEditor({ obj, onCancel, onSave }) {
-  const [form, setForm] = useState(obj);
-  const handleImage = (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
+  // announcements
+  function renderAnnouncements(){
+    const a = getAnnouncements();
+    const el = document.getElementById('announcements');
+    if(!a.length){
+      el.innerHTML = '<div class="small-muted">No announcements yet.</div>';
+    } else {
+      el.innerHTML = a.map(x => `<div style="padding:8px;border-radius:8px;background:#fff;margin-bottom:8px"><strong>${escapeHtml(x.title||'Announcement')}</strong><div class="small-muted">${escapeHtml(x.body||'')}</div></div>`).join('');
+    }
+  }
+
+  // sanitize
+  function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; }); }
+
+  // cart handling (local in memory inside localStorage under current user)
+  function getCart(){
+    const user = getCurrent();
+    if(!user) return [];
+    return user.cart || [];
+  }
+  function saveCart(cart){
+    const cur = getCurrent();
+    if(!cur) return;
+    cur.cart = cart;
+    setCurrent(cur);
+    // update users storage if user signed up
+    const users = readUsers();
+    const idx = users.findIndex(u => u.username === cur.username);
+    if(idx>=0){ users[idx] = cur; writeUsers(users); }
+    updateCartCount();
+  }
+  function updateCartCount(){ cartCount.textContent = (getCart()||[]).length; }
+
+  // click handlers (delegated)
+  document.body.addEventListener('click', (e)=>{
+    if(e.target.matches('#open-login')) { openAuth(); }
+    if(e.target.matches('#open-admin')) { openAdmin(); }
+    if(e.target.matches('#do-signin')) signIn();
+    if(e.target.matches('#do-signup')) signUp();
+    if(e.target.matches('#to-signup')) toggleAuth('signup');
+    if(e.target.matches('#to-signin')) toggleAuth('signin');
+    if(e.target.matches('#admin-login-btn')) adminLogin();
+    if(e.target.matches('#admin-close')) closeAdmin();
+    if(e.target.matches('#admin-logout')) adminLogout();
+    if(e.target.matches('#add-product-btn')) adminAddProduct();
+    if(e.target.matches('[data-delete]')) adminDeleteProduct(e.target.dataset.delete);
+    if(e.target.matches('[data-edit]')) adminEditProduct(e.target.dataset.edit);
+    if(e.target.matches('[data-add]')) addToCart(e.target.dataset.add);
+    if(e.target.matches('[data-buy]')) buyNow(e.target.dataset.buy);
+    if(e.target.matches('#btn-view-cart')) openCart();
+    if(e.target.matches('#close-cart')) closeCart();
+    if(e.target.matches('#checkout-btn')) checkout();
+    if(e.target.matches('[data-share]')) shareWhatsApp(e.target.dataset.share);
+    if(e.target.matches('[data-view]')) viewProduct(e.target.dataset.view);
+    if(e.target.matches('#save-announcement')) saveAnnouncement();
+  });
+
+  // open / close modals
+  function openAuth(){ authModal.classList.add('open'); authModal.setAttribute('aria-hidden','false'); }
+  function closeAuth(){ authModal.classList.remove('open'); authModal.setAttribute('aria-hidden','true'); }
+  function openAdmin(){ adminModal.classList.add('open'); adminModal.setAttribute('aria-hidden','false'); }
+  function closeAdmin(){ adminModal.classList.remove('open'); adminModal.setAttribute('aria-hidden','true'); }
+  function openCart(){ cartModal.classList.add('open'); cartModal.setAttribute('aria-hidden','false'); renderCart(); }
+  function closeCart(){ cartModal.classList.remove('open'); cartModal.setAttribute('aria-hidden','true'); }
+  // click outside to close modals
+  document.querySelectorAll('.modal').forEach(m=>{
+    m.addEventListener('click', (ev)=>{
+      if(ev.target === m){ m.classList.remove('open'); m.setAttribute('aria-hidden','true'); }
+    });
+  });
+
+  // auth toggles
+  function toggleAuth(tab){ document.getElementById('signin-form').style.display = tab==='signin' ? 'block' : 'none'; document.getElementById('signup-form').style.display = tab==='signup' ? 'block' : 'none'; document.getElementById('auth-title').textContent = tab==='signin' ? 'Sign In' : 'Create Account'; }
+
+  function signUp(){
+    const name = document.getElementById('signup-name').value.trim();
+    const username = document.getElementById('signup-username').value.trim();
+    const password = document.getElementById('signup-password').value;
+    if(!username || !password || !name){ alert('Please fill all fields'); return; }
+    const users = readUsers();
+    if(users.find(u=>u.username === username)){ alert('User already exists'); return; }
+    const newUser = { name, username, password, role:'user', cart:[] };
+    users.push(newUser);
+    writeUsers(users);
+    setCurrent(newUser);
+    updateUIForUser();
+    closeAuth();
+    alert('Account created and signed in.');
+  }
+
+  function signIn(){
+    const username = document.getElementById('signin-username').value.trim();
+    const password = document.getElementById('signin-password').value;
+    // admin special case
+    if(username === ADMIN_DEFAULTS.username && password === ADMIN_DEFAULTS.password){
+      setCurrent({ username:'admin', name:'Administrator', role:'admin', cart:[] });
+      updateUIForUser();
+      closeAuth();
+      alert('Signed in as Admin (use Admin Panel button for management).');
+      return;
+    }
+    const users = readUsers();
+    const u = users.find(x=>x.username === username && x.password === password);
+    if(!u){ alert('Invalid credentials'); return; }
+    setCurrent(u);
+    updateUIForUser();
+    closeAuth();
+    alert('Signed in successfully.');
+  }
+
+  function updateUIForUser(){
+    const cur = getCurrent();
+    if(!cur){ currentUserDisplay.textContent = 'Not signed in'; return; }
+    currentUserDisplay.textContent = `${cur.name || cur.username} (${cur.role||'user'})`;
+    updateCartCount();
+  }
+
+  // Admin panel
+  function adminLogin(){
+    const u = document.getElementById('admin-username').value.trim();
+    const p = document.getElementById('admin-password').value;
+    if(u === ADMIN_DEFAULTS.username && p === ADMIN_DEFAULTS.password){
+      // show admin panel
+      document.getElementById('admin-login').style.display = 'none';
+      document.getElementById('admin-panel').style.display = 'block';
+      renderAdminProducts();
+    } else {
+      alert('Invalid admin credentials.');
+    }
+  }
+  function closeAdmin(){ closeAdmin(); } // handled via event above
+  function adminLogout(){
+    document.getElementById('admin-login').style.display = 'block';
+    document.getElementById('admin-panel').style.display = 'none';
+    // close modal
+    adminModal.classList.remove('open');
+  }
+
+  // add product (reads file as base64)
+  function adminAddProduct(){
+    const name = document.getElementById('p-name').value.trim();
+    const price = document.getElementById('p-price').value;
+    const tags = (document.getElementById('p-tags').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+    const file = document.getElementById('p-image').files[0];
+    if(!name || !price || !file){ alert('Name, price and image required'); return; }
     const reader = new FileReader();
-    reader.onload = () => setForm({...form, image: reader.result});
-    reader.readAsDataURL(f);
-  };
-  return (
-    <div className="mt-4 bg-white p-4 rounded">
-      <h3 className="font-semibold">Edit Product</h3>
-      <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-        <input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} className="p-2 border rounded" placeholder="Title" />
-        <input type="number" value={form.price} onChange={e=>setForm({...form,price:parseInt(e.target.value||0)})} className="p-2 border rounded" placeholder="Price" />
-        <input type="number" value={form.qty} onChange={e=>setForm({...form,qty:parseInt(e.target.value||0)})} className="p-2 border rounded" placeholder="Stock qty" />
-        <input type="file" accept="image/*" onChange={handleImage} className="p-2" />
-        <textarea value={form.desc} onChange={e=>setForm({...form,desc:e.target.value})} className="p-2 border rounded md:col-span-2" placeholder="Description" />
-      </div>
-      <div className="mt-3 flex justify-end gap-2">
-        <button onClick={onCancel} className="px-3 py-2">Cancel</button>
-        <button onClick={()=>onSave(form)} className="px-3 py-2 bg-green-600 text-white rounded">Save</button>
-      </div>
-    </div>
-  );
-}
+    reader.onload = function(){ 
+      const imgData = reader.result;
+      const products = readProducts();
+      products.unshift({ name, price: Number(price), tags, image: imgData, isNew:true });
+      writeProducts(products);
+      renderProducts();
+      renderAdminProducts();
+      document.getElementById('p-name').value=''; document.getElementById('p-price').value=''; document.getElementById('p-tags').value=''; document.getElementById('p-image').value='';
+      alert('Product added.');
+    };
+    reader.readAsDataURL(file);
+  }
 
-// --------- Admin News ----------
-function AdminNews() {
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
-  const add = () => { if (!title) { alert('Title required'); return; } pushNews(title, body); setTitle(''); setBody(''); alert('Posted'); };
-  return (
-    <div className="bg-white p-4 rounded">
-      <h2 className="font-semibold">Post Update</h2>
-      <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Title" className="w-full p-2 border rounded mt-2" />
-      <textarea value={body} onChange={e=>setBody(e.target.value)} placeholder="Body" className="w-full p-2 border rounded mt-2" />
-      <div className="flex justify-end mt-2">
-        <button onClick={add} className="px-3 py-2 bg-indigo-600 text-white rounded">Post Update</button>
-      </div>
-    </div>
-  );
-}
+  function adminDeleteProduct(index){
+    if(!confirm('Delete this product?')) return;
+    const p = readProducts();
+    p.splice(Number(index),1);
+    writeProducts(p);
+    renderProducts();
+    renderAdminProducts();
+  }
 
-function pushNews(title, body) {
-  const news = readLS(LS.NEWS, []);
-  news.unshift({ id: uid(), title, body, date: new Date().toISOString() });
-  writeLS(LS.NEWS, news);
-}
+  function adminEditProduct(index){
+    const p = readProducts();
+    const prod = p[Number(index)];
+    const newName = prompt('Product name', prod.name);
+    if(newName === null) return;
+    const newPrice = prompt('Price (INR)', prod.price);
+    if(newPrice===null) return;
+    prod.name = newName;
+    prod.price = Number(newPrice);
+    p[Number(index)] = prod;
+    writeProducts(p);
+    renderProducts();
+    renderAdminProducts();
+  }
 
-// --------- NotFound ----------
-function NotFound() { return <div>Page not found</div>; }
+  // cart + checkout
+  function addToCart(idx){
+    const cur = getCurrent();
+    if(!cur){ alert('Please sign in to add to cart'); openAuth(); return; }
+    const products = readProducts();
+    const prod = products[Number(idx)];
+    if(!prod){ alert('Product not found'); return; }
+    const cart = getCart() || [];
+    cart.push({ productIndex: Number(idx), addedAt: Date.now() });
+    saveCart(cart);
+    alert('Added to cart');
+  }
+
+  function renderCart(){
+    const container = document.getElementById('cart-contents');
+    const cart = getCart();
+    const products = readProducts();
+    if(!cart || !cart.length){ container.innerHTML = '<div class="small-muted">Cart is empty.</div>'; return; }
+    container.innerHTML = '';
+    const ul = document.createElement('div');
+    let total = 0;
+    cart.forEach((it, i)=>{
+      const prod = products[it.productIndex];
+      if(!prod) return;
+      total += Number(prod.price);
+      const row = document.createElement('div');
+      row.style.display='flex'; row.style.justifyContent='space-between'; row.style.alignItems='center'; row.style.padding='8px 0'; row.innerHTML = `
+        <div style="display:flex;align-items:center; gap:8px">
+          <img src="${prod.image}" style="width:56px;height:56px;object-fit:cover;border-radius:8px" />
+          <div>
+            <div style="font-weight:700">${escapeHtml(prod.name)}</div>
+            <div class="small-muted">₹${Number(prod.price).toLocaleString()}</div>
+          </div>
+        </div>
+        <div>
+          <button class="link-btn" data-remove="${i}">Remove</button>
+        </div>
+      `;
+      ul.appendChild(row);
+    });
+    const tot = document.createElement('div');
+    tot.style.marginTop='12px';
+    tot.innerHTML = `<div style="display:flex;justify-content:space-between; font-weight:700">Total <div>₹${Number(total).toLocaleString()}</div></div>`;
+    container.appendChild(ul);
+    container.appendChild(tot);
+
+    // attach remove handlers
+    container.querySelectorAll('[data-remove]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const idx = Number(btn.dataset.remove);
+        const c = getCart()||[];
+        c.splice(idx,1);
+        saveCart(c);
+        renderCart();
+      });
+    });
+  }
+
+  function checkout(){
+    const cur = getCurrent();
+    if(!cur){ alert('Please sign in to checkout'); openAuth(); return; }
+    const cart = getCart() || [];
+    if(!cart.length){ alert('Cart empty'); return; }
+    // calculate total
+    const products = readProducts();
+    let total = 0;
+    cart.forEach(it => { const p = products[it.productIndex]; if(p) total += Number(p.price); });
+    // mock payment — choose a method
+    const method = prompt(`Pay ₹${total}\nChoose payment method: UPI / Card / COD`, 'UPI');
+    if(!method){ return; }
+    // simulate success
+    alert(`Payment method: ${method}\nPayment successful (mock). Order placed. Our pickup person will contact you. First pickup is free.`);
+    // clear cart
+    saveCart([]);
+    closeCart();
+  }
+
+  // Buy now
+  function buyNow(idx){
+    const cur = getCurrent();
+    if(!cur){ alert('Please sign in to buy'); openAuth(); return; }
+    const products = readProducts();
+    const p = products[Number(idx)];
+    if(!p){ alert('Product not found'); return; }
+    const confirmBuy = confirm(`Buy "${p.name}" for ₹${p.price} now?`);
+    if(!confirmBuy) return;
+    const method = prompt(`Pay ₹${p.price}\nChoose payment method: UPI / Card / COD`, 'UPI');
+    if(!method) return;
+    alert('Payment successful (mock). Our pickup person will contact you for pickup. First pickup is free.');
+  }
+
+  function shareWhatsApp(idx){
+    const p = readProducts()[Number(idx)];
+    if(!p) return;
+    const waNumber = '+918639299665';
+    const text = encodeURIComponent(`Check out this product from Lakshmi Boutique: ${p.name} - Price ₹${p.price}. Contact: +91 86392 99665`);
+    window.open(`https://wa.me/${waNumber.replace(/\D/g,'')}?text=${text}`,'_blank');
+  }
+
+  function viewProduct(idx){
+    const p = readProducts()[Number(idx)];
+    if(!p) return;
+    alert(`${p.name}\nPrice: ₹${p.price}\nTags: ${p.tags.join(', ')}\n\nPickup: First-time pickup is free. Our person will come to your home.`);
+  }
+
+  function saveAnnouncement(){
+    const text = document.getElementById('announcement-text').value.trim();
+    if(!text){ alert('Enter announcement text'); return; }
+    const a = getAnnouncements();
+    a.unshift({ title:'Announcement', body:text, date:Date.now() });
+    setAnnouncements(a);
+    renderAnnouncements();
+    document.getElementById('announcement-text').value='';
+    alert('Announcement published.');
+  }
+
+  // initial demo data if none present
+  function seedDemo(){
+    if(!readProducts().length){
+      const demo = [
+        { name:'Kanchipuram Silk Saree', price: 5999, tags:['saree','silk','discount'], image: sampleData('saree1'), isNew:true },
+        { name:'Floral Anarkali Dress', price: 2999, tags:['dress','anarkali'], image: sampleData('dress1'), isNew:false },
+        { name:'Designer Blouse - Red', price: 899, tags:['blouse'], image: sampleData('blouse1'), isNew:false }
+      ];
+      writeProducts(demo);
+    }
+    if(!getAnnouncements().length){
+      setAnnouncements([{ title:'Welcome', body:'Lakshmi Boutique launched (demo). WhatsApp +91 86392 99665 for quick help.' }]);
+    }
+  }
+
+  // sample placeholder images (small base64 SVGs for demo)
+  function sampleData(name){
+    const colors = { saree1:'#f7c6d6', dress1:'#ffe7d6', blouse1:'#e7f6ff' };
+    const bg = colors[name] || '#f2f2f2';
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='100%' height='100%' fill='${bg}' rx='24'/><text x='50%' y='50%' text-anchor='middle' font-size='36' fill='#333' font-family='Arial' dy='.3em'>${name}</text></svg>`;
+    return 'data:image/svg+xml;base64,' + btoa(svg);
+  }
+
+  // small helpers
+  (function init(){
+    seedDemo();
+    renderProducts();
+    renderAnnouncements();
+    updateUIForUser();
+    updateCartCount();
+    renderAdminProducts();
+  })();
+
+  // prevent accidental strings in console etc
+</script>
+
+</body>
+</html>
